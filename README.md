@@ -1,276 +1,124 @@
-# Defender for Cloud Automation Toolkit
+Microsoft Defender for Cloud - GCP Enablement Scripts
+Automate enabling Microsoft Defender for Cloud services on GCP projects through REST API calls.
+Prerequisites
 
-Automate Microsoft Defender for Cloud deployments across GCP environments with predefined security profiles.
+Azure CLI (az) installed and authenticated (az login)
+jq for JSON processing
+curl for API calls
+Existing GCP security connector with workload identity federation configured
+Required GCP service accounts and workload identity providers already set up
 
-## 🚀 Quick Start
+Scripts Overview
+1. enable-cspm.sh
+Enables basic CSPM (Cloud Security Posture Management) monitoring only.
+What it enables:
 
-### 1. Prerequisites
+CspmMonitorGcp - Free foundational security posture monitoring
 
-- **Azure CLI** installed and authenticated (`az login`)
-- **jq** for JSON processing (`sudo apt install jq` or `brew install jq`)
-- **curl** for API calls
-- **Python 3.7+** (for Python script)
-- **Permissions**: Contributor access to Azure subscription and Security Admin role
+Use case: New projects that only need basic compliance monitoring without paid features.
+2. enable-all-defender.sh
+Enables comprehensive protection across all Defender offerings.
+What it enables:
 
-### 2. Setup Configuration
+CspmMonitorGcp - Basic CSPM monitoring
+DefenderCspmGcp - Advanced CSPM with VM scanning, CIEM, data sensitivity discovery
+DefenderForContainersGcp - Container security with image assessment, agentless discovery, audit logs
+DefenderForDatabasesGcp - Database protection with Arc auto-provisioning
 
-Create your `config.json` file with your environment details:
+Use case: Production projects requiring maximum security coverage.
+3. get-connector-info.sh
+Retrieves connector details to simplify command construction.
+What it does:
 
-```bash
-cp config.json.template config.json
-# Edit config.json with your values
-```
+Queries existing connector to extract project ID and hierarchy identifier
+Generates ready-to-use CLI commands for other scripts
 
-**Required Configuration:**
-```json
-{
-  "defaults": {
-    "subscriptionId": "your-azure-subscription-id",
-    "resourceGroup": "your-resource-group",
-    "managementProject": "your-gcp-management-project-id",
-    "projectId": "your-gcp-project-id",
-    "projectNumber": "your-gcp-project-number",
-    "workloadIdentityPoolId": "your-workload-identity-pool-id",
-    "managementProjectNumber": "your-management-project-number",
-    "serviceAccounts": {
-      "cspmMonitor": "microsoft-defender-cspm@mdc-mgmt-proj-XXXX.iam.gserviceaccount.com",
-      "defenderForServers": "microsoft-defender-for-servers@your-project.iam.gserviceaccount.com",
-      ...
-    }
+Use case: When you know the connector name but need to look up project details.
+Configuration
+config.json
+Update with your environment-specific values:
+json{
+  "azure": {
+    "subscriptionId": "your-subscription-id",
+    "resourceGroup": "your-resource-group", 
+    "apiVersion": "2025-08-01-preview",
+    "location": "eastus"
+  },
+  "gcp": {
+    "workloadIdentityPoolId": "your-pool-id",
+    "organizationalData": {
+      "organizationMembershipType": "Member",
+      "parentHierarchyId": "parent-hierarchy-id",
+      "managementProjectNumber": "mgmt-project-number"
+    },
+    "scanInterval": 12
+  },
+  "serviceAccounts": {
+    "cspmMonitor": "microsoft-defender-cspm@mgmt-project.iam.gserviceaccount.com"
+  },
+  "workloadIdentityProviders": {
+    "cspm": "csmp",
+    "containers": "containers", 
+    "containersStreams": "containers-streams",
+    "databasesArc": "defender-for-databases-arc-ap"
   }
 }
-```
+Usage
+Get Connector Information
+bashchmod +x get-connector-info.sh
+./get-connector-info.sh GCP_my-project
+Output:
+Connector Name: GCP_my-project
+Project ID: my-project-123
+Hierarchy ID: 123456789012
 
-### 3. Find Your Values
+CLI Command:
+./enable-all-defender.sh --connector GCP_my-project --project my-project-123 --hierarchy 123456789012
+Basic CSPM Only
+bashchmod +x enable-cspm.sh
+./enable-cspm.sh --connector GCP_my-project --project my-project-123 --hierarchy 123456789012
+Full Protection Suite
+bashchmod +x enable-all-defender.sh  
+./enable-all-defender.sh --connector GCP_my-project --project my-project-123 --hierarchy 123456789012
+Simplified Workflow
+Instead of manually specifying project details, use the info script first:
+bash# Step 1: Get connector details
+./get-connector-info.sh GCP_my-project
 
-**Azure Values:**
-```bash
-# Subscription ID
-az account show --query id -o tsv
+# Step 2: Copy and run the generated command
+./enable-all-defender.sh --connector GCP_my-project --project my-project-123 --hierarchy 123456789012
+Arguments
+ArgumentDescriptionExample--connectorGCP security connector name in AzureGCP_my-project--projectGCP project IDmy-project-123--hierarchyGCP project number123456789012
+Cost Considerations
 
-# Resource Group (where Defender connectors are created)
-az group list --query "[].name" -o table
-```
+enable-cspm.sh: Only enables free CSPM monitoring
+enable-all-defender.sh: Enables multiple paid services that will increase Azure billing
 
-**GCP Values:**
-```bash
-# Project ID
-gcloud config get-value project
+Review Defender for Cloud pricing before running the full enablement script.
+Prerequisites Setup
+Before using these scripts, ensure you have:
 
-# Project Number
-gcloud projects describe YOUR_PROJECT_ID --format="value(projectNumber)"
+GCP Workload Identity Federation configured between Azure and GCP
+Service accounts created in your GCP project with appropriate permissions
+Security connector already created in Azure (can be basic/empty initially)
+Proper IAM roles in both Azure and GCP for the operation
 
-# Management Project (usually your organization's central security project)
-# Check your existing Defender connector or ask your GCP admin
-```
+Troubleshooting
+Authentication errors: Verify az login is completed and token is valid
+Service account errors: Ensure all required service accounts exist in the target GCP project
+Permission errors: Check that your Azure account has Security Admin role on the subscription
+Workload identity errors: Verify the workload identity pool and providers are correctly configured
+Security Notes
 
-## 📋 Available Security Profiles
+Scripts use Azure CLI authentication tokens (1-hour expiration)
+All sensitive configuration is externalized to config.json
+No credentials are hardcoded in the scripts
+API calls use HTTPS with proper authorization headers
 
-| Profile | Use Case | Monthly Cost* | Features |
-|---------|----------|---------------|----------|
-| **minimal** | Development/Testing | ~$120 | CSPM monitoring only |
-| **standard** | Staging environments | ~$300 | CSPM + Servers P1 + Basic scanning |
-| **enhanced** | Production workloads | ~$520 | Full protection: Servers P2, Databases, Containers |
-| **maximum** | Critical/Regulated | ~$900 | Enhanced + CIEM, Data discovery, Advanced scanning |
+Contributing
+When contributing, ensure:
 
-*Cost estimates for 10 VMs
-
-## 🛠️ Usage
-
-### Shell Script (Recommended)
-
-```bash
-# Check costs before deploying
-./defender_management.sh cost maximum 20
-
-# Deploy maximum security to a connector
-./defender_management.sh update \
-  DefenderConnector_MyProject \
-  my-gcp-project-id \
-  maximum
-
-# List all connectors and their current plans
-./defender_management.sh list
-
-# Show current configuration
-./defender_management.sh show DefenderConnector_MyProject
-```
-
-### Python Script (Advanced)
-
-```bash
-# Cost comparison
-python3 defender_manager.py --action compare
-
-# Apply configuration
-python3 defender_manager.py \
-  --action apply \
-  --resource-group my-resource-group \
-  --connector-name MyConnector \
-  --defender-group enhanced
-
-# Validate configuration
-python3 defender_manager.py --action validate --defender-group maximum
-```
-
-## 📁 File Structure
-
-```
-defender-toolkit/
-├── defender_management.sh       # Main shell script
-├── defender_manager.py          # Python script (advanced features)
-├── config.json                  # Your environment configuration
-├── config.json.template         # Template for new setups
-└── README.md                    # This file
-```
-
-## 🔧 Commands Reference
-
-### Shell Script Commands
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `update` | Apply security profile to connector | `./defender_management.sh update ConnectorName project-id maximum` |
-| `show` | Display current connector config | `./defender_management.sh show ConnectorName` |
-| `list` | List all connectors with their plans | `./defender_management.sh list` |
-| `cost` | Show cost estimate for plan | `./defender_management.sh cost enhanced 15` |
-| `tags` | Show connector tags only | `./defender_management.sh tags ConnectorName` |
-
-### Python Script Actions
-
-| Action | Description | Example |
-|---------|-------------|---------|
-| `apply` | Deploy configuration | `--action apply --defender-group maximum` |
-| `list` | List connectors by group | `--action list` |
-| `cost` | Cost estimation | `--action cost --defender-group enhanced --vm-count 20` |
-| `compare` | Feature comparison table | `--action compare` |
-| `validate` | Validate configuration | `--action validate --defender-group maximum` |
-
-## 💡 Common Use Cases
-
-### New Environment Setup
-```bash
-# 1. Check costs
-./defender_management.sh cost enhanced 10
-
-# 2. Apply configuration
-./defender_management.sh update MyConnector my-project-id enhanced
-
-# 3. Verify deployment
-./defender_management.sh show MyConnector
-```
-
-### Upgrade Security Level
-```bash
-# Upgrade from standard to maximum
-./defender_management.sh update ExistingConnector my-project-id maximum
-```
-
-### Cost Analysis
-```bash
-# Compare costs for different VM counts
-./defender_management.sh cost minimal 5
-./defender_management.sh cost standard 5
-./defender_management.sh cost enhanced 5
-./defender_management.sh cost maximum 5
-```
-
-## 🎯 Security Profile Details
-
-### Minimal Profile
-- **Purpose**: Development and testing environments
-- **Features**: Basic CSPM monitoring
-- **Cost**: ~$7/VM + $50 base
-- **Best for**: Non-production workloads
-
-### Standard Profile  
-- **Purpose**: Staging and pre-production
-- **Features**: CSPM + Defender for Servers P1 + Basic VM scanning
-- **Cost**: ~$20/VM + $100 base
-- **Best for**: Staging environments with moderate security needs
-
-### Enhanced Profile
-- **Purpose**: Production workloads
-- **Features**: Full protection suite including Servers P2, Databases, Containers
-- **Cost**: ~$37/VM + $150 base
-- **Best for**: Business-critical production systems
-
-### Maximum Profile
-- **Purpose**: Highly regulated and critical systems
-- **Features**: Everything + CIEM discovery, Data sensitivity, Advanced scanning
-- **Cost**: ~$65/VM + $250 base
-- **Best for**: Financial services, healthcare, government
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**"Configuration file not found"**
-```bash
-# Make sure config.json exists
-ls -la config.json
-# Copy from template if needed
-cp config.json.template config.json
-```
-
-**"Failed to get access token"**
-```bash
-# Re-authenticate with Azure
-az login
-az account set --subscription "your-subscription-id"
-```
-
-**"HTTP 400: Body validation failed"**
-- Check your service account email formats in config.json
-- Ensure all required fields are present
-- Validate JSON syntax: `cat config.json | jq .`
-
-**"Unknown DefenderGroup"**
-- Valid options: `minimal`, `standard`, `enhanced`, `maximum`
-- Check spelling and case sensitivity
-
-### Validation Commands
-
-```bash
-# Test Azure connectivity
-az account show
-
-# Test GCP project access
-gcloud projects describe YOUR_PROJECT_ID
-
-# Validate JSON syntax
-cat config.json | jq .
-
-# Test script with dry run
-./defender_management.sh cost minimal 1
-```
-
-## 🔐 Security Considerations
-
-- **Least Privilege**: Use service accounts with minimal required permissions
-- **Credential Management**: Never commit config.json with real values to version control
-- **Environment Separation**: Use different config files for dev/staging/prod
-- **Regular Reviews**: Periodically review and update security configurations
-
-## 📚 Additional Resources
-
-- [Microsoft Defender for Cloud Documentation](https://docs.microsoft.com/en-us/azure/defender-for-cloud/)
-- [GCP Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation)
-- [Azure Security Connector API Reference](https://docs.microsoft.com/en-us/rest/api/defenderforcloud/)
-
-## 🆘 Support
-
-For issues or questions:
-
-1. **Check the troubleshooting section** above
-2. **Validate your configuration** using the validation commands
-3. **Review Azure and GCP permissions**
-4. **Check service account email formats**
-
-## 📝 License
-
-This toolkit is provided as-is for automation of Microsoft Defender for Cloud deployments. Ensure compliance with your organization's security policies and Microsoft's licensing terms.
-
----
-
-**⚠️ Important**: Always test in a development environment before applying to production systems. Monitor costs closely as Defender for Cloud charges can accumulate quickly with higher security profiles.
+No hardcoded credentials or project-specific values
+Proper error handling and logging
+Configuration remains externalized
+Scripts work across different GCP project configurations
